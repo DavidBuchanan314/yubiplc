@@ -32,7 +32,7 @@ func main() {
 			{
 				Name:   "init",
 				Usage:  "generate a new NIST-P256 private key on the yubikey, overwriting slot 9C",
-				Action: doInit,
+				Action: doInitCmd,
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:  "management-key",
@@ -48,16 +48,16 @@ func main() {
 			{
 				Name:   "pubkey",
 				Usage:  "print the corresponding public key to stdout, in did:key format",
-				Action: doPubkey,
+				Action: doPubkeyCmd,
 			},
 			{
 				Name:   "sign",
 				Usage:  "sign a did:plc operation (reads and writes JSON on stdio)",
-				Action: doSign,
+				Action: doSignCmd,
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:  "pin",
-						Usage: "pin code, typically a 6 or 8 digit number",
+						Usage: "authentication pin code, typically a 6 or 8 digit number",
 						Value: piv.DefaultPIN,
 					},
 				},
@@ -117,7 +117,7 @@ func pubkeyToDidKey(pubkey crypto.PublicKey) (string, error) {
 	return indigo_pubkey.DIDKey(), nil
 }
 
-func doInit(ctx context.Context, cmd *cli.Command) error {
+func doInitCmd(ctx context.Context, cmd *cli.Command) error {
 	yk, err := findYubikey()
 	if err != nil {
 		return err
@@ -164,7 +164,7 @@ func doInit(ctx context.Context, cmd *cli.Command) error {
 	return nil
 }
 
-func doPubkey(ctx context.Context, cmd *cli.Command) error {
+func doPubkeyCmd(ctx context.Context, cmd *cli.Command) error {
 	yk, err := findYubikey()
 	if err != nil {
 		return err
@@ -207,7 +207,7 @@ func signWithYubikey(msg []byte, auth_pin string) ([]byte, error) {
 		return nil, err
 	}
 
-	// necessary to extract out the pubkey
+	// necessary to extract the pubkey
 	cert, err := yk.Attest(piv.SlotSignature)
 	if err != nil {
 		return nil, err
@@ -229,7 +229,7 @@ func signWithYubikey(msg []byte, auth_pin string) ([]byte, error) {
 	return ecdsa_privkey.Sign(nil, digest[:], crypto.SHA256)
 }
 
-func doSign(ctx context.Context, cmd *cli.Command) error {
+func doSignCmd(ctx context.Context, cmd *cli.Command) error {
 	// prepare the data to be signed
 	stdin, err := io.ReadAll(os.Stdin)
 	if err != nil {
@@ -245,11 +245,13 @@ func doSign(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
+	// actually sign it
 	asn1sig, err := signWithYubikey(cbor_bytes, cmd.String("pin"))
 	if err != nil {
 		return err
 	}
 
+	// embed the signature into the output JSON
 	compactsig, err := asn1SigToCompact(asn1sig)
 	if err != nil {
 		return err
