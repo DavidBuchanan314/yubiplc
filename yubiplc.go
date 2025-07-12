@@ -8,8 +8,10 @@ import (
 	"crypto/sha256"
 	"encoding/asn1"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math/big"
 	"os"
@@ -18,6 +20,7 @@ import (
 	indigo "github.com/bluesky-social/indigo/atproto/crypto"
 	"github.com/go-piv/piv-go/v2/piv"
 	"github.com/manifoldco/promptui"
+	"github.com/notjuliet/grove/cbor"
 	"github.com/urfave/cli/v3"
 )
 
@@ -27,7 +30,7 @@ func main() {
 		Commands: []*cli.Command{
 			{
 				Name:   "init",
-				Usage:  "generate a new NIST-P256 private key on the yubikey, in slot 9C",
+				Usage:  "generate a new NIST-P256 private key on the yubikey, overwriting slot 9C",
 				Action: doInit,
 				Flags: []cli.Flag{
 					&cli.BoolFlag{
@@ -139,6 +142,7 @@ func doInit(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
+	fmt.Println("Success! Here's the public key:")
 	fmt.Println(didkey)
 	return nil
 }
@@ -179,30 +183,52 @@ func asn1SigToCompact(asn1sig []byte) ([]byte, error) {
 	return compact[:], nil
 }
 
-func doSign(ctx context.Context, cmd *cli.Command) error {
+func signWithYubikey(msg []byte) ([]byte, error) {
+	// begin doing the signing
 	yk, err := findYubikey()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	// pull out the pubkey
+	// necessary to extract out the pubkey
 	cert, err := yk.Attest(piv.SlotSignature)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	auth := piv.KeyAuth{PIN: piv.DefaultPIN} // TODO: option to prompt for pin interactively
 	privkey, err := yk.PrivateKey(piv.SlotSignature, cert.PublicKey, auth)
 	if err != nil {
+		return nil, err
+	}
+
+	ecdsa_privkey, ok := privkey.(*piv.ECDSAPrivateKey)
+	if !ok {
+		return nil, errors.New("expected ECDSA key")
+	}
+
+	digest := sha256.Sum256(msg)
+	fmt.Fprintln(os.Stderr, "please boop your yubikey now")
+	return ecdsa_privkey.Sign(nil, digest[:], crypto.SHA256)
+}
+
+func doSign(ctx context.Context, cmd *cli.Command) error {
+	// prepare the data to be signed
+	stdin, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return err
+	}
+	var unmarshalled map[string]any
+	if err := json.Unmarshal(stdin, &unmarshalled); err != nil {
+		return err
+	}
+	delete(unmarshalled, "sig") // remove any existing sig
+	cbor_bytes, err := cbor.Encode(unmarshalled)
+	if err != nil {
 		return err
 	}
 
-	ecdsa_privkey := privkey.(*piv.ECDSAPrivateKey)
-
-	msg := "hello"
-	digest := sha256.Sum256([]byte(msg))
-	fmt.Fprintln(os.Stderr, "please boop your yubikey now")
-	asn1sig, err := ecdsa_privkey.Sign(nil, digest[:], crypto.SHA256)
+	asn1sig, err := signWithYubikey(cbor_bytes)
 	if err != nil {
 		return err
 	}
@@ -212,6 +238,13 @@ func doSign(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	fmt.Println(base64.RawURLEncoding.EncodeToString(compactsig))
+	unmarshalled["sig"] = base64.RawURLEncoding.EncodeToString(compactsig)
+
+	remarshalled, err := json.MarshalIndent(unmarshalled, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(string(remarshalled))
 	return nil
 }

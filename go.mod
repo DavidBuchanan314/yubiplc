@@ -14,6 +14,7 @@ require (
 	github.com/chzyer/readline v0.0.0-20180603132655-2972be24d48e // indirect
 	github.com/manifoldco/promptui v0.9.0 // indirect
 	github.com/mr-tron/base58 v1.2.0 // indirect
+	github.com/notjuliet/grove v0.0.0-20250611170316-e41bca1ce078 // indirect
 	gitlab.com/yawning/secp256k1-voi v0.0.0-20230925100816-f2616030848b // indirect
 	gitlab.com/yawning/tuplehash v0.0.0-20230713102510-df83abbf9a02 // indirect
 	golang.org/x/crypto v0.21.0 // indirect
