@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/asn1"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +34,11 @@ func main() {
 				Usage:  "generate a new NIST-P256 private key on the yubikey, overwriting slot 9C",
 				Action: doInit,
 				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:  "management-key",
+						Usage: "management key, as 48 hex digits",
+						Value: hex.EncodeToString(piv.DefaultManagementKey),
+					},
 					&cli.BoolFlag{
 						Name:  "please-overwrite-my-keyslot",
 						Usage: "skip the interactive prompt, for use in testing etc.",
@@ -48,6 +54,13 @@ func main() {
 				Name:   "sign",
 				Usage:  "sign a did:plc operation (reads and writes JSON on stdio)",
 				Action: doSign,
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:  "pin",
+						Usage: "pin code, typically a 6 or 8 digit number",
+						Value: piv.DefaultPIN,
+					},
+				},
 			},
 		},
 	}
@@ -127,12 +140,16 @@ func doInit(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
+	management_key, err := hex.DecodeString(cmd.String("management-key"))
+	if err != nil {
+		return err
+	}
 	key := piv.Key{
 		Algorithm:   piv.AlgorithmEC256,
 		PINPolicy:   piv.PINPolicyAlways,
 		TouchPolicy: piv.TouchPolicyAlways,
 	}
-	pubkey, err := yk.GenerateKey(piv.DefaultManagementKey, piv.SlotSignature, key)
+	pubkey, err := yk.GenerateKey(management_key, piv.SlotSignature, key)
 	if err != nil {
 		return err
 	}
@@ -183,7 +200,7 @@ func asn1SigToCompact(asn1sig []byte) ([]byte, error) {
 	return compact[:], nil
 }
 
-func signWithYubikey(msg []byte) ([]byte, error) {
+func signWithYubikey(msg []byte, auth_pin string) ([]byte, error) {
 	// begin doing the signing
 	yk, err := findYubikey()
 	if err != nil {
@@ -196,7 +213,7 @@ func signWithYubikey(msg []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	auth := piv.KeyAuth{PIN: piv.DefaultPIN} // TODO: option to prompt for pin interactively
+	auth := piv.KeyAuth{PIN: auth_pin} // TODO: option to prompt for pin interactively
 	privkey, err := yk.PrivateKey(piv.SlotSignature, cert.PublicKey, auth)
 	if err != nil {
 		return nil, err
@@ -228,7 +245,7 @@ func doSign(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	asn1sig, err := signWithYubikey(cbor_bytes)
+	asn1sig, err := signWithYubikey(cbor_bytes, cmd.String("pin"))
 	if err != nil {
 		return err
 	}
